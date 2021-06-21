@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# Wrapper to use JSON with cURL. It sends a regular request using cURL, and the
+# pretty-print the response if Content-Type is JSON.
+#
+# If the stdin is not a TTY, it sends its content as the request body.
+#
+# Usage:
+#
+#   $ curljson [options] URL
+#   $ curljson [options] URL < body.json
+#
+# [options] is any cURL option. See https://curl.se/docs/manpage.html for details.
+
+set -euo pipefail
+
+HEADERS_FILE=$(mktemp)
+BODY_FILE=$(mktemp)
+METADATA_FILE=$(mktemp)
+
+cleanup() {
+  rm -f "$HEADERS_FILE" "$BODY_FILE" "$METADATA_FILE"
+}
+
+trap cleanup EXIT
+
+
+# Execute cURL.
+#
+# If stdin is not a TTY, use it as the request body.
+
+CURL_ARGS=(
+  --silent
+  --write-out "CURLJSONMETA;%{time_total};%{size_download};%{content_type};"
+  --dump-header "$HEADERS_FILE"
+  --output "$BODY_FILE"
+)
+
+if [ ! -t 0 ]
+then
+  CURL_ARGS+=(
+    --header "Content-Type: application/json"
+    --data-binary @-
+  )
+fi
+
+curl "${CURL_ARGS[@]}" "$@" > "$METADATA_FILE"
+
+
+# Read metadata from the --write-out output.
+readarray -d ';' -n 4 -t METADATA < "$METADATA_FILE"
+if [ "${METADATA[0]}" = CURLJSONMETA ]
+then
+  CONTENT_TYPE=${METADATA[3]}
+
+  if [ -t 2 ]
+  then
+    printf '# \e[3m%s bytes in %s seconds.\e[m\n\n' "${METADATA[2]}" "${METADATA[1]}" 1>&2
+  fi
+else
+  # The user added their own --write-out option,
+  # so we can't parse the output from cURL.
+  #
+  # Try to extract Content-Type from HEADERS_FILE.
+
+  cat "$METADATA_FILE"
+
+  CONTENT_TYPE=$(
+    awk < "$HEADERS_FILE" -v IGNORECASE=1 '
+      /^content-type: / {
+        sub("[;\\r].*", "", $2); print $2
+      }
+    '
+  )
+fi
+
+
+# Print headers only if stderr is a TTY.
+if [ -t 2 ]
+then
+  sed < "$HEADERS_FILE" 1>&2 '
+    s/^\(\S\+:\)/\x1b[36m\1\x1b[m/
+
+    /^HTTP\/[0-9]/ {
+      s/.*/\x1b[1m\0\x1b[m/
+    }
+  '
+fi
+
+
+# Print body.
+if [ -t 1 ] && [ "$CONTENT_TYPE" = application/json ]
+then
+  jq . "$BODY_FILE"
+else
+  cat "$BODY_FILE"
+fi
