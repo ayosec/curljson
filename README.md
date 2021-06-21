@@ -4,7 +4,7 @@ Wrapper to use JSON with [curl](https://curl.se/).
 
 ---
 
-![Front](front.svg)
+<a target="_blank" href="https://github.com/ayosec/curljson/raw/master/front.svg" ><img alt="Front" src="https://github.com/ayosec/curljson/raw/master/front.svg" /></a>
 
 ---
 
